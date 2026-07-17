@@ -35,15 +35,20 @@ export function useTaskStream(deploymentId?: string) {
         break;
 
       case "status_update":
-        // Chỉ dùng để bật trạng thái loading (isStreaming đã true).
-        // Có thể mở rộng set một statusMessage chi tiết hơn.
+        // API thật gửi task_id + context_id ngay ở status_update đầu tiên — capture sớm.
+        if (evt.data.task_id) chat.setTaskId(evt.data.task_id);
+        if (evt.data.context_id) chat.setContextId(evt.data.context_id);
         break;
 
       case "artifact_update":
         // Chỉ render structured JSON khi last_chunk = true (theo docs).
         if (evt.data.last_chunk) {
           const update = parseSectionUpdate(evt.data.content);
-          if (update) website.applyUpdate(update);
+          if (update) {
+            website.applyUpdate(update);
+            // Agent structured-output không emit token → đổ message vào chat bubble.
+            if (update.message) chat.setAssistantContent(update.message);
+          }
         }
         break;
 
@@ -55,8 +60,7 @@ export function useTaskStream(deploymentId?: string) {
         break;
 
       case "final":
-        chat.setContextId(evt.data.task.context_id ?? chat.contextId);
-        chat.setTaskId(evt.data.task.task_id);
+        // task_id/context_id đã capture từ status_update; không đọc final.task (shape A2A khác).
         chat.finishAssistant();
         chat.clearThinking();
         chat.setStreaming(false);
@@ -90,7 +94,17 @@ export function useTaskStream(deploymentId?: string) {
           prompt: trimmed,
           sectionId: selected?.id,
           sectionType: selected?.type,
-          currentContent: selected ? `${selected.title}\n${selected.content}` : undefined,
+          // currentContent = JSON string các field display → agent đủ ngữ cảnh edit.
+          currentContent: selected
+            ? JSON.stringify({
+                heading: selected.heading,
+                subheading: selected.subheading,
+                content: selected.content,
+                ctaLabel: selected.ctaLabel,
+                bullets: selected.bullets,
+                features: selected.features,
+              })
+            : undefined,
           contextId: chat.contextId,
         },
         {

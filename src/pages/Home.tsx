@@ -7,18 +7,24 @@ import { WebsiteCanvas } from "@/components/Canvas/WebsiteCanvas";
 import { ChatPanel } from "@/components/Chat";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { SECTION_EDITOR_AGENT_NAME, getApiKey } from "@/api/agent";
 
 export default function Home() {
   const { data: agents, isLoading } = useAgents();
   const resetWebsite = useWebsiteStore((s) => s.reset);
   const resetChat = useChatStore((s) => s.reset);
 
-  // Chọn agent đang `running` làm deployment_id cho streamTask (theo docs Agent Management)
+  // Ưu tiên agent section_editor (có schema khớp FE), fallback running đầu tiên.
   const deploymentId = useMemo(() => {
+    const editor = agents?.find(
+      (a) => a.agent_name === SECTION_EDITOR_AGENT_NAME && a.status === "running",
+    );
+    if (editor) return editor.deployment_id;
     const running = agents?.find((a) => a.status === "running");
     return (running ?? agents?.[0])?.deployment_id;
   }, [agents]);
   const agent = agents?.find((a) => a.deployment_id === deploymentId) ?? null;
+  const isLive = !!getApiKey();
 
   const handleReset = () => {
     resetWebsite();
@@ -35,7 +41,9 @@ export default function Home() {
           </div>
           <div>
             <h1 className="text-sm font-semibold leading-tight">Agent Provider Demo</h1>
-            <p className="text-[11px] text-muted-foreground">AI Website Editor · Mock SSE</p>
+            <p className="text-[11px] text-muted-foreground">
+              AI Website Editor · {isLive ? "Live SSE" : "Demo (mock)"}
+            </p>
           </div>
         </div>
 

@@ -64,6 +64,10 @@ export interface ArtifactData {
 export interface StatusData {
   state: TaskState;
   final?: boolean;
+  // API thật gửi kèm ngay ở status_update đầu tiên — capture sớm.
+  task_id?: string;
+  context_id?: string | null;
+  message?: string | null;
 }
 export interface ErrorData {
   code: string;
@@ -71,7 +75,9 @@ export interface ErrorData {
 }
 export interface FinalData {
   content: string;
-  task: TaskInfo;
+  // Object A2A thật dùng camelCase (id/contextId/status.state) — không khớp TaskInfo.
+  // Lấy task_id/context_id từ status_update thay vì field này; không đọc trực tiếp.
+  task: unknown;
 }
 
 export type SSEEvent =

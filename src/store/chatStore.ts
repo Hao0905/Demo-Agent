@@ -17,6 +17,8 @@ interface ChatState {
   addUserMessage: (content: string) => string;
   beginAssistant: () => string;
   appendDelta: (delta: string) => void;
+  /** Set nguyên content của message assistant đang stream (cho agent structured-output không emit token). */
+  setAssistantContent: (content: string) => void;
   finishAssistant: () => void;
   addThinking: (line: string) => void;
   clearThinking: () => void;
@@ -58,6 +60,15 @@ export const useChatStore = create<ChatState>((set) => ({
         messages: state.messages.map((m) =>
           m.id === id ? { ...m, content: m.content + delta } : m,
         ),
+      };
+    }),
+
+  setAssistantContent: (content) =>
+    set((state) => {
+      const id = state.streamingMessageId;
+      if (!id) return state;
+      return {
+        messages: state.messages.map((m) => (m.id === id ? { ...m, content } : m)),
       };
     }),
 

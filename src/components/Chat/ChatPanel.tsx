@@ -19,7 +19,7 @@ export function ChatPanel({ deploymentId }: { deploymentId?: string }) {
         </div>
         <div>
           <div className="text-sm font-semibold leading-tight">AI Agent</div>
-          <div className="text-[11px] text-muted-foreground">Section Editor · website_builder</div>
+          <div className="text-[11px] text-muted-foreground">Section Editor</div>
         </div>
       </div>
 
