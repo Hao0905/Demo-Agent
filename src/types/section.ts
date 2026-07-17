@@ -47,6 +47,8 @@ export interface SectionUpdate {
   bullets?: string[];
   features?: FeatureItem[];
   style?: SectionStyle;
+  /** Tóm tắt thay đổi từ agent — hiển thị trong chat, KHÔNG apply vào section. */
+  message?: string;
 }
 
 export const SECTION_LABELS: Record<SectionType, string> = {

@@ -53,6 +53,9 @@ export const MOCK_AGENTS: AgentDeployment[] = [
   },
 ];
 
+/** Agent thật có input/output schema khớp SectionUpdate — FE ưu tiên chọn agent này khi live. */
+export const SECTION_EDITOR_AGENT_NAME = "section_editor";
+
 // =========================================================================
 // NON-STREAMING APIs (axios + mock fallback khi chưa có API key)
 // =========================================================================
@@ -471,20 +474,159 @@ function runMockStream(
 }
 
 // =========================================================================
+// REAL SSE STREAMING
+// POST /task/stream (và /task/continue/stream) qua fetch + parse SSE thủ công.
+// Theo docs/agent/7.md mục 7.4. Fallback mock khi lỗi mạng trước khi nhận event.
+// =========================================================================
+
+/** Base URL API thật (env), fallback "/api" cho proxy dev nếu có. */
+function getApiBase(): string {
+  return import.meta.env.VITE_AGENT_API_URL ?? "/api";
+}
+
+/**
+ * Agent có input_schema → task_message PHẢI là JSON string khớp schema
+ * (verify bằng test: text tự do gây validation error).
+ * `currentContent` là JSON string nội dung section (do useTaskStream build).
+ */
+function buildTaskMessage(params: StreamTaskParams): string {
+  return JSON.stringify({
+    sectionId: params.sectionId ?? params.sectionType ?? "hero",
+    sectionType: params.sectionType ?? "hero",
+    currentContent: params.currentContent ?? "{}",
+    userPrompt: params.prompt,
+  });
+}
+
+interface RealStreamConfig {
+  endpoint: "/task/stream" | "/task/continue/stream";
+  body: Record<string, unknown>;
+}
+
+/**
+ * runRealStream — gọi API streaming thật, parse SSE, fallback mock khi lỗi kết nối.
+ * Trả cancel fn (abort fetch + huỷ mock nếu đã fallback).
+ */
+function runRealStream(
+  params: AnyStreamParams,
+  config: RealStreamConfig,
+  handlers: StreamHandlers,
+): () => void {
+  const controller = new AbortController();
+  let mockCancel: (() => void) | null = null;
+  let receivedEvent = false;
+  let fallbackUsed = false;
+
+  const emit = (evt: SSEEvent): void => {
+    receivedEvent = true;
+    handlers.onEvent(evt);
+  };
+
+  (async () => {
+    try {
+      const key = getApiKey();
+      const res = await fetch(`${getApiBase()}${config.endpoint}`, {
+        method: "POST",
+        signal: controller.signal,
+        headers: {
+          "Content-Type": "application/json",
+          ...(key ? { "X-API-Key": key } : {}),
+        },
+        body: JSON.stringify(config.body),
+      });
+      if (!res.ok || !res.body) {
+        const text = await res.text().catch(() => "");
+        throw new Error(text || `HTTP ${res.status}`);
+      }
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+
+        const chunks = buffer.split("\n\n");
+        buffer = chunks.pop() ?? "";
+
+        for (const chunk of chunks) {
+          const lines = chunk.split("\n");
+          const eventLine = lines.find((l) => l.startsWith("event:"));
+          const dataLine = lines.find((l) => l.startsWith("data:"));
+          if (!eventLine || !dataLine) continue;
+
+          const event = eventLine.replace("event:", "").trim() as SSEEvent["event"];
+          try {
+            const data = JSON.parse(dataLine.replace("data:", "").trim());
+            // data từ API là dynamic — cast qua SSEEvent ở biên system.
+            emit({ event, data } as SSEEvent);
+          } catch {
+            // data không phải JSON hợp lệ — bỏ qua event này.
+          }
+        }
+      }
+    } catch (err) {
+      // Lỗi do abort (cancel) — không xử lý.
+      if (controller.signal.aborted) return;
+      // Lỗi mạng/trước khi nhận event nào → fallback mock (yêu cầu "offline fallback").
+      if (!receivedEvent) {
+        fallbackUsed = true;
+        mockCancel = runMockStream(params, handlers);
+        return;
+      }
+      // Lỗi giữa stream → báo error.
+      handlers.onError?.(err instanceof Error ? err : new Error(String(err)));
+    }
+  })();
+
+  return () => {
+    controller.abort();
+    if (fallbackUsed) mockCancel?.();
+  };
+}
+
+// =========================================================================
 // PUBLIC STREAMING APIs
 // =========================================================================
 
 /**
  * POST /task/stream — streaming SSE. Trả về hàm cleanup (abort).
- * Tương đương `streamTask(deploymentId, userId, prompt, onEvent, onError)` trong docs.
+ * Có API key → real; không key → mock (demo mode).
  */
 export function streamTask(params: StreamTaskParams, handlers: StreamHandlers): () => void {
-  return runMockStream(params, handlers);
+  if (!getApiKey()) return runMockStream(params, handlers);
+  return runRealStream(
+    params,
+    {
+      endpoint: "/task/stream",
+      body: {
+        deployment_id: params.deploymentId,
+        user_id: params.userId,
+        task_message: buildTaskMessage(params),
+        ...(params.contextId ? { context_id: params.contextId } : {}),
+      },
+    },
+    handlers,
+  );
 }
 
 /** POST /task/continue/stream — tiếp tục hội thoại khi Agent cần input thêm. */
 export function continueTask(params: ContinueTaskParams, handlers: StreamHandlers): () => void {
-  return runMockStream(params, handlers);
+  if (!getApiKey()) return runMockStream(params, handlers);
+  return runRealStream(
+    params,
+    {
+      endpoint: "/task/continue/stream",
+      body: {
+        task_id: params.taskId,
+        deployment_id: params.deploymentId,
+        user_input: params.userInput,
+      },
+    },
+    handlers,
+  );
 }
 
 // =========================================================================
