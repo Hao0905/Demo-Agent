@@ -1,4 +1,4 @@
-### important: read @docs/7.md , @docs/8.md, @docs/9.md
+### important: đọc hướng dẫn sử dụng Agent Provider trong @docs/agent
 xây dựng tính năng:
 Chat với Agent
 AI Edit Section
